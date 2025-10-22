@@ -1,11 +1,13 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, make_response
 import requests
 import hashlib
 from datetime import datetime
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad
 import base64
+import json
 
+# --- Configuration ---
 SECRET_SEED = "APIMPDS$9712Q"
 IV_STR = "AP4123IMPDS@12768F"
 API_URL = 'http://impds.nic.in/impdsmobileapi/api/getrationcard'
@@ -15,6 +17,7 @@ ACCESS_KEY = "paidchx"
 
 app = Flask(__name__)
 
+# --- Core Functions ---
 def get_md5_hex(input_string: str) -> str:
     return hashlib.md5(input_string.encode('iso-8859-1')).hexdigest()
 
@@ -43,23 +46,89 @@ def encrypt_payload(plaintext_id: str, session_id: str) -> str:
     b64_double_encoded = base64.b64encode(b64_encoded_inner)
     return b64_double_encoded.decode('utf-8')
 
+# --- ROUTES ---
+
+@app.route('/')
+def home():
+    return "<h2 style='color:#00ffc8;font-family:monospace;'>✅ IMPDS Fetch API Running</h2><p style='color:#00ff9d;font-family:monospace;'>Use /fetch for JSON or /pretty for styled output</p>"
+
 @app.route('/fetch', methods=['GET'])
 def fetch():
     try:
         key = request.args.get("key", "").strip()
         if key != ACCESS_KEY:
             return jsonify({"error": "Invalid API key"}), 401
+
         aadhaar_input = request.args.get("aadhaar", "").strip()
         if not aadhaar_input or not aadhaar_input.isdigit() or len(aadhaar_input) != 12:
             return jsonify({"error": "Invalid Aadhaar number. Must be 12 digits."}), 400
+
         session_id = generate_session_id()
         encrypted_id = encrypt_payload(aadhaar_input, session_id)
+
         headers = {'User-Agent': USER_AGENT, 'Content-Type': 'application/json; charset=utf-8'}
         payload = {"id": encrypted_id, "idType": "U", "userName": "IMPDS", "token": TOKEN, "sessionId": session_id}
+
         response = requests.post(API_URL, headers=headers, json=payload, timeout=15)
         return jsonify(response.json())
+
     except requests.exceptions.RequestException as e:
         return jsonify({"error": f"Network error: {str(e)}"}), 500
+    except Exception as e:
+        return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
+
+@app.route('/pretty', methods=['GET'])
+def pretty():
+    try:
+        key = request.args.get("key", "").strip()
+        if key != ACCESS_KEY:
+            return jsonify({"error": "Invalid API key"}), 401
+
+        aadhaar_input = request.args.get("aadhaar", "").strip()
+        if not aadhaar_input or not aadhaar_input.isdigit() or len(aadhaar_input) != 12:
+            return jsonify({"error": "Invalid Aadhaar number. Must be 12 digits."}), 400
+
+        session_id = generate_session_id()
+        encrypted_id = encrypt_payload(aadhaar_input, session_id)
+
+        headers = {'User-Agent': USER_AGENT, 'Content-Type': 'application/json; charset=utf-8'}
+        payload = {"id": encrypted_id, "idType": "U", "userName": "IMPDS", "token": TOKEN, "sessionId": session_id}
+
+        response = requests.post(API_URL, headers=headers, json=payload, timeout=15)
+        data = response.json()
+
+        formatted_json = json.dumps(data, indent=4, ensure_ascii=False)
+        response_html = f"""
+        <html>
+        <head>
+        <title>IMPDS Pretty Viewer</title>
+        <style>
+        body {{
+            background-color: #0e0e10;
+            color: #00ff9d;
+            font-family: 'Roboto Mono', monospace;
+            padding: 20px;
+        }}
+        pre {{
+            background-color: #1b1b1f;
+            border-radius: 10px;
+            padding: 15px;
+            box-shadow: 0 0 20px #00ff9d33;
+            overflow-x: auto;
+        }}
+        h2 {{
+            color: #00ffc8;
+        }}
+        </style>
+        </head>
+        <body>
+        <h2>📦 IMPDS Fetch Result</h2>
+        <pre>{formatted_json}</pre>
+        </body>
+        </html>
+        """
+        return make_response(response_html, 200)
+
     except Exception as e:
         return jsonify({"error": f"Unexpected error: {str(e)}"}), 500
 
